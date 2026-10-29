@@ -1,0 +1,11 @@
+﻿services:
+  ats-bot:
+    build: ..
+    container_name: telegram-ats-bot
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?Add OPENAI_API_KEY to .env}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-6-luna}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?Add TELEGRAM_BOT_TOKEN to .env}

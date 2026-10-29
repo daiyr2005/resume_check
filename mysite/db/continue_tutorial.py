@@ -6,18 +6,21 @@ import logging
 import os
 from dataclasses import dataclass, field
 
-import aiohttp
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart
 from aiogram.types import Message
 from pypdf import PdfReader
+from mysite.services.ats_scorer import format_score_report, score_resume
+from mysite.services.llm_service import LLMServiceError, review_resume
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2:latest")
 MAX_PDF_BYTES = 15 * 1024 * 1024
 
 
@@ -43,35 +46,9 @@ def extract_pdf_text(data: bytes) -> str:
 
 
 async def analyze_resume(resume: str, vacancy: str) -> str:
-    prompt = f"""Ты — ATS-проверяющий резюме. Сравнивай только резюме с требованиями вакансии.
-Не выдумывай факты, навыки или опыт. Дай ответ на русском языке в формате:
-1. Оценка соответствия: число от 0 до 100 процентов.
-2. Подходящие требования и подтверждения из резюме.
-3. Отсутствующие или не подтверждённые требования.
-4. ATS-ключевые слова, которые уместно добавить только если они правдивы.
-5. Практические рекомендации по улучшению резюме.
-
-ТРЕБОВАНИЯ ВАКАНСИИ:
-{vacancy[:12000]}
-
-ТЕКСТ РЕЗЮМЕ:
-{resume[:18000]}
-"""
-    url = f"{OLLAMA_URL.rstrip('/')}/api/chat"
-    payload = {
-        "model": OLLAMA_MODEL,
-        "messages": [{"role": "user", "content": prompt}],
-        "stream": False,
-        "options": {"temperature": 0.2},
-    }
-    timeout = aiohttp.ClientTimeout(total=180)
-    async with aiohttp.ClientSession(timeout=timeout) as client:
-        async with client.post(url, json=payload) as response:
-            if response.status != 200:
-                detail = (await response.text())[:500]
-                raise RuntimeError(f"Ollama вернула HTTP {response.status}: {detail}")
-            result = await response.json()
-    return result.get("message", {}).get("content", "").strip()
+    report = format_score_report(score_resume(resume, vacancy))
+    expert_review = await review_resume(resume, vacancy)
+    return f"{report}\n\nПРОФЕССИОНАЛЬНЫЙ РАЗБОР\n{expert_review}"
 
 
 def split_telegram_text(text: str, limit: int = 4000) -> list[str]:
@@ -93,7 +70,7 @@ async def start(message: Message) -> None:
         "Пришлите PDF-файл резюме, затем отправьте требования к вакансии текстом "
         "(можно несколькими сообщениями). Когда закончите, выполните /check.\n\n"
         "Команды: /check — ATS-анализ, /status — проверить, что загружено, "
-        "/reset — начать заново. Анализ выполняется через Ollama."
+        "/reset — начать заново. Анализ выполняется через OpenAI ChatGPT API."
     )
 
 
@@ -127,9 +104,9 @@ async def check(message: Message) -> None:
         result = await analyze_resume(session.resume_text, vacancy)
         if not result:
             raise RuntimeError("Модель вернула пустой ответ")
-    except (aiohttp.ClientError, asyncio.TimeoutError, RuntimeError) as exc:
+    except (LLMServiceError, asyncio.TimeoutError, RuntimeError) as exc:
         logger.exception("ATS analysis failed")
-        await message.answer(f"Не удалось выполнить анализ: {str(exc)[:700]}\nПроверьте, что Ollama запущена и модель доступна.")
+        await message.answer(f"Не удалось выполнить анализ: {str(exc)[:700]}")
         return
 
     for part in split_telegram_text(result):

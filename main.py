@@ -1,21 +1,36 @@
+from __future__ import annotations
+
 import os
+from contextlib import asynccontextmanager
 
 import uvicorn
 from fastapi import FastAPI
-from libcloud.storage.drivers.local import LocalStorageDriver
-from sqlalchemy_file.storage import StorageManager
-from mysite.chain import agent
-from mysite.api import  info, check
+
+from mysite.api import check, info
+from mysite.db import model as _models  # noqa: F401
 from mysite.db.db import Base, engine
 
 
-Base.metadata.create_all(bind=engine)
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    Base.metadata.create_all(bind=engine)
+    yield
 
-app = FastAPI(title="HR resume checker")
+
+app = FastAPI(title="ATS Resume AI", lifespan=lifespan)
 app.include_router(info.router)
-app.include_router(agent.agent_router)
 app.include_router(check.check_router)
 
 
+@app.get("/health", tags=["health"])
+async def health() -> dict[str, str]:
+    return {"status": "ok"}
+
+
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="127.0.0.1", port=8001, reload=True)
+    uvicorn.run(
+        "main:app",
+        host=os.getenv("HOST", "127.0.0.1"),
+        port=int(os.getenv("PORT", "8001")),
+        reload=os.getenv("RELOAD", "false").lower() == "true",
+    )

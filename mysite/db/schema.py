@@ -86,6 +86,8 @@ from pydantic import BaseModel, Field
 
 class CheckTextIn(BaseModel):
     resume: str = Field(min_length=50, max_length=20000)
+    vacancy: str = Field(default="", max_length=12000)
+    vacancy: str = Field(default="", max_length=12000)
 
 
 class CheckOut(BaseModel):

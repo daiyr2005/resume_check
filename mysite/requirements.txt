@@ -1,0 +1,4 @@
+aiogram==3.31.0
+pypdf==6.7.4
+openai>=2.0.0
+python-dotenv>=1.0.0
